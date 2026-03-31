@@ -9,7 +9,7 @@ conda activate vllm
 MODEL_PATH="/home/aiserver/sunyan/Project/LLM/Qwen3.5-27B.Q4_K_M/Qwen3.5-27B.Q4_K_M.gguf"
 HOST="0.0.0.0"
 PORT=8001
-CTX_SIZE=8192
+CTX_SIZE=32768
 N_GPU_LAYERS=-1
 
 echo "================================================"
