@@ -1,0 +1,4 @@
+Qwen3.5-27B.Q4_K_M/
+__pycache__/
+logs/
+*.pyc
