@@ -13,25 +13,49 @@ conda activate vllm
 ```
 
 ### API Service Management
+
+**Important**: Both models share port 8001 — only one can run at a time. Stop the active service before starting the other.
+
 ```bash
-bash start_qwen_27b_background.sh        # Start server (background, recommended)
+# Qwen model
+bash start_qwen_27b_background.sh        # Start server (background)
 bash start_qwen_27b_gguf.sh              # Start server (foreground)
 bash stop_qwen_27b_gguf.sh               # Stop server
-curl http://localhost:8001/v1/models      # Check status
 tail -f logs/qwen_27b_gpu_server.log      # View logs
+
+# Qwopus model
+bash start_qwopus_27b_background.sh      # Start server (background)
+bash start_qwopus_27b_gguf.sh            # Start server (foreground)
+bash stop_qwopus_27b_gguf.sh             # Stop server
+tail -f logs/qwopus_27b_gpu_server.log    # View logs
+
+# Shared
+curl http://localhost:8001/v1/models      # Check status
+fuser -k 8001/tcp                        # Force-free port
 ```
+
+**Gotcha**: Stop scripts use `pkill -f "llama_cpp.server"` which kills **any** llama-cpp server, not just the named model. Always verify which model is running before stopping.
 
 ### Testing
 ```bash
-python test_qwen_27b_gguf.py             # Quick single test (greeting only)
-python test_qwen_27b_full.py             # Full 3-scenario suite (greeting, code, long text)
-python -c "from test_qwen_27b_gguf import test_qwen_27b_gguf; test_qwen_27b_gguf()"  # Run specific test
+# Qwen
+python test_qwen_27b_gguf.py             # Quick single test (greeting)
+python test_qwen_27b_full.py             # Full 3-scenario suite
+
+# Qwopus
+python test_qwopus_27b_gguf.py           # Quick single test (greeting)
+python test_qwopus_27b_full.py           # Full 3-scenario suite
+```
+
+### Web Chat Interface (Chainlit)
+```bash
+bash start_web_chat.sh                   # Start web UI on port 8002 (requires model API on 8001)
 ```
 
 ### Linting & Type Checking
 ```bash
 ruff check . && ruff format --check .    # Run before committing
-mypy test_qwen_27b_gguf.py test_qwen_27b_full.py
+mypy test_qwen_27b_gguf.py test_qwen_27b_full.py test_qwopus_27b_gguf.py test_qwopus_27b_full.py
 ```
 
 ---
@@ -57,10 +81,6 @@ import time
 ### Type Hints
 - Prefer type hints on function signatures; inline body annotations are optional
 - Return type should be explicit, e.g. `-> dict`, `-> None`
-```python
-def stream_response(client, messages, max_tokens=1024, temperature=0.7) -> dict:
-    """处理流式响应并显示统计信息"""
-```
 
 ### Naming
 - Functions/variables: `snake_case` | Classes: `PascalCase`
@@ -81,6 +101,7 @@ except Exception as e:
 
 ### Streaming API Pattern (Critical)
 - **All** API calls use streaming (`stream=True`) by default
+- Both models are served identically — same `model="qwen"` name, same endpoint
 ```python
 client = OpenAI(base_url="http://localhost:8001/v1", api_key="dummy", timeout=120.0)
 
@@ -99,6 +120,8 @@ for chunk in stream:
         print(content, end="", flush=True)
         full_content.append(content)
 ```
+
+**Gotcha**: Qwopus outputs `<think/>` reasoning blocks before the actual response. The `delta.content` includes this thinking text — parse accordingly if you only want the final answer.
 
 ### Performance Metrics Pattern
 - Always track first-token latency, token count, and tokens/second
@@ -139,27 +162,38 @@ tokens_per_second = token_count / generation_time if generation_time > 0 else 0
 ## Project-Specific Notes
 
 ### Model Configuration
-- **27B GGUF**: `./Qwen3.5-27B.Q4_K_M/Qwen3.5-27B.Q4_K_M.gguf`
-- Port: 8001 | Base URL: `http://localhost:8001/v1` | API key: `"dummy"`
-- Context: 8192 tokens | Model name: `"qwen"` | Chat format: `chatml`
+| | Qwen | Qwopus |
+|---|---|---|
+| **Path** | `Qwen3.5-27B.Q4_K_M/Qwen3.5-27B.Q4_K_M.gguf` | `Qwopus3.5-27B-v3-Q4_K_M/Qwopus3.5-27B-v3-Q4_K_M.gguf` |
+| **Thinking** | No | Yes (`<think/>` blocks) |
+| **Speed** | ~30-50 tokens/s | ~30-35 tokens/s |
+
+Shared config: Port 8001 | `http://localhost:8001/v1` | API key `"dummy"` | model name `"qwen"` | chat format `chatml` | context 32768 tokens
 
 ### GPU Inference
-- Hardware: 2x RTX 4090D (48GB) | Backend: llama-cpp-python with CUDA 12.1
-- GPU offloading: all layers (`n_gpu_layers=-1`) | Speed: 30-50 tokens/s
+- Hardware: 2x RTX 4090D (48GB total) | Backend: llama-cpp-python with CUDA 12.1
+- GPU offloading: all layers (`n_gpu_layers=-1`)
 
 ### Max Tokens Strategy
 - Simple chat: 1024 | Code generation: 4096 | Long-form: 2048
 
 ### Common Issues
-- Port in use: `bash stop_qwen_27b_gguf.sh` or `fuser -k 8001/tcp`
+- Port in use: stop the running model first, or `fuser -k 8001/tcp`
 - GPU OOM: Reduce `n_gpu_layers` in start script
 - Unresponsive: `curl http://localhost:8001/v1/models`
+- Wrong model running: both stop scripts kill any llama_cpp.server — check logs to verify
 
 ### Directory Layout
 ```
-├── *.sh                    # Server lifecycle scripts (start/stop/background)
-├── test_qwen_27b_gguf.py   # Quick single test with perf stats
-├── test_qwen_27b_full.py   # 3-scenario test suite (greeting, code, long text)
-├── logs/                   # Server runtime logs (gitignored)
-└── Qwen3.5-27B.Q4_K_M/    # GGUF model weights
+├── start_qwen_27b_*.sh          # Qwen server lifecycle
+├── stop_qwen_27b_gguf.sh
+├── test_qwen_27b_*.py           # Qwen tests
+├── start_qwopus_27b_*.sh        # Qwopus server lifecycle
+├── stop_qwopus_27b_gguf.sh
+├── test_qwopus_27b_*.py         # Qwopus tests
+├── app.py                       # Chainlit web chat app
+├── start_web_chat.sh            # Chainlit startup script
+├── logs/                        # Server runtime logs (gitignored)
+├── Qwen3.5-27B.Q4_K_M/         # Qwen GGUF model weights (gitignored)
+└── Qwopus3.5-27B-v3-Q4_K_M/    # Qwopus GGUF model weights (gitignored)
 ```

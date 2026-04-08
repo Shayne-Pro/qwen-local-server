@@ -1,4 +1,6 @@
 Qwen3.5-27B.Q4_K_M/
+Qwopus3.5-27B-v3-Q4_K_M/
 __pycache__/
 logs/
 *.pyc
+.chainlit/
