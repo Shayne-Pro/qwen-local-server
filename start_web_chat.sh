@@ -7,7 +7,7 @@ source ~/miniconda3/etc/profile.d/conda.sh
 conda activate vllm
 
 HOST="0.0.0.0"
-PORT=8002
+PORT=8080
 
 echo "================================================"
 echo "启动 Chainlit 网页问答界面"
