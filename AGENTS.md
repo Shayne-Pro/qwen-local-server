@@ -51,8 +51,12 @@ python test_qwopus_27b_full.py           # Full 3-scenario suite
 ```
 
 ### Web Chat Interface (Chainlit)
+Requires model API running on port 8001.
+
 ```bash
-bash start_web_chat.sh                   # Start web UI on port 8080 (requires model API on 8001)
+bash start_web_chat.sh                   # Start web UI on port 8080 (background)
+bash stop_web_chat.sh                    # Stop web UI
+tail -f logs/web_chat.log                # View logs
 ```
 
 ---
