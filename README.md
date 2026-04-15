@@ -8,8 +8,8 @@
 
 ```bash
 # 创建并激活 conda 环境
-conda create -n llm python=3.10 -y
-conda activate llm
+conda create -n vllm python=3.10 -y
+conda activate vllm
 
 # 安装依赖（CUDA 12.1）
 pip install llama-cpp-python[server] openai chainlit
@@ -46,10 +46,12 @@ curl http://localhost:8001/v1/models
 ### 4. 启动 Web 聊天
 
 ```bash
-bash start_web_chat.sh
+bash start_web_chat.sh                   # 后台启动
+tail -f logs/web_chat.log                # 查看日志
+bash stop_web_chat.sh                    # 停止
 ```
 
-浏览器访问 `http://localhost:8002` 即可使用。
+浏览器访问 `http://localhost:8080` 即可使用。
 
 ### 5. 运行测试
 
@@ -66,8 +68,12 @@ python test_qwopus_27b_full.py
 ### 6. 停止服务
 
 ```bash
+# 停止模型服务
 bash stop_qwen_27b_gguf.sh
 # 或
 bash stop_qwopus_27b_gguf.sh
+
+# 停止 Web 聊天
+bash stop_web_chat.sh
 ```
 
