@@ -1,26 +1,18 @@
 #!/bin/bash
 
-# Qwopus3.5-27B-v3 GGUF API 服务停止脚本
-
 echo "================================================"
-echo "停止 Qwopus3.5-27B-v3 GGUF API 服务"
+echo "停止模型 API 服务"
 echo "================================================"
 
-# 查找并停止服务进程
 if pgrep -f "llama_cpp.server" > /dev/null; then
     echo "正在停止服务进程..."
     pkill -f "llama_cpp.server"
-    
-    # 等待进程完全停止
     sleep 2
-    
-    # 检查是否还在运行
     if pgrep -f "llama_cpp.server" > /dev/null; then
         echo "⚠ 服务仍在运行，尝试强制停止..."
         pkill -9 -f "llama_cpp.server"
         sleep 1
     fi
-    
     if ! pgrep -f "llama_cpp.server" > /dev/null; then
         echo "✓ 服务已成功停止"
     else
@@ -31,7 +23,6 @@ else
     echo "ℹ 服务未在运行"
 fi
 
-# 检查端口占用
 if fuser 8001/tcp > /dev/null 2>&1; then
     echo "⚠ 端口 8001 仍被占用，尝试释放..."
     fuser -k 8001/tcp 2>/dev/null
