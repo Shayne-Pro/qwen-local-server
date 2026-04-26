@@ -26,18 +26,19 @@ for arg in "${@:2}"; do
     esac
 done
 
+EXTRA_ARGS=()
+
 case "$MODEL" in
     qwen)
         MODEL_PATH="$SCRIPT_DIR/Qwen3.6-27B-UD-Q4_K_XL/Qwen3.6-27B-UD-Q4_K_XL.gguf"
         MODEL_NAME="Qwen3.6-27B"
         LOG_FILE="logs/qwen_27b_gpu_server.log"
-        EXTRA_ARGS="--chat_template_kwargs {\"enable_thinking\": $ENABLE_THINKING, \"preserve_thinking\": true}"
+        EXTRA_ARGS=(--chat_template_kwargs "{\"enable_thinking\": $ENABLE_THINKING, \"preserve_thinking\": true}")
         ;;
     qwopus)
         MODEL_PATH="$SCRIPT_DIR/Qwopus3.5-27B-v3-Q4_K_M/Qwopus3.5-27B-v3-Q4_K_M.gguf"
         MODEL_NAME="Qwopus3.5-27B-v3"
         LOG_FILE="logs/qwopus_27b_gpu_server.log"
-        EXTRA_ARGS=""
         ;;
     *)
         echo "✗ 未知模型: $MODEL (可选: qwen, qwopus)"
@@ -69,7 +70,7 @@ if [[ "$FG" == true ]]; then
         --port "$PORT" \
         --n_ctx "$CTX_SIZE" \
         --n_gpu_layers "$N_GPU_LAYERS" \
-        $EXTRA_ARGS \
+        "${EXTRA_ARGS[@]}" \
         --verbose True
 else
     mkdir -p logs
@@ -79,7 +80,7 @@ else
         --port "$PORT" \
         --n_ctx "$CTX_SIZE" \
         --n_gpu_layers "$N_GPU_LAYERS" \
-        $EXTRA_ARGS \
+        "${EXTRA_ARGS[@]}" \
         --verbose True > "$LOG_FILE" 2>&1 &
 
     PID=$!

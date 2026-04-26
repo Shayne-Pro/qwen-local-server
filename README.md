@@ -72,6 +72,60 @@ Qwen3.6-27B 支持可配置的思考（reasoning）模式：
 
 启动脚本通过 `--chat_template_kwargs` 控制此行为，支持运行时切换。
 
+## 采样参数预设
+
+Qwen3.6 官方推荐了 4 种采样参数配置，适用于不同场景。通过 `LLM_PRESET` 环境变量切换：
+
+### 预设列表
+
+| 预设名称 | 用途 | temperature | top_p | presence_penalty |
+|---------|------|------------|-------|-----------------|
+| `thinking_general` | 通用任务（思考模式） | 1.0 | 0.95 | 1.5 |
+| `thinking_coding` | 精确编码（思考模式） | 0.6 | 0.95 | 0.0 |
+| `instruct_general` | 通用任务（非思考） | 0.7 | 0.8 | 1.5 |
+| `instruct_reasoning` | 推理任务（非思考） | 1.0 | 0.95 | 1.5 |
+
+所有预设共有：`top_k=20`, `min_p=0.0`, `repetition_penalty=1.0`
+
+### 使用方式
+
+```bash
+# 默认使用 instruct_general
+bash start_web_chat.sh
+
+# 切换到精确编码思考模式（需先启动 thinking 模式的模型服务）
+LLM_PRESET=thinking_coding bash start_web_chat.sh
+
+# 切换到推理 Instruct 模式
+LLM_PRESET=instrat_reasoning bash start_web_chat.sh
+
+# 切换到通用思考模式
+LLM_PRESET=thinking_general bash start_web_chat.sh
+```
+
+> **注意**：使用 `thinking_*` 预设时，需配合思考模式启动模型服务（不加 `--no-thinking`）。
+
+### Python 代码中使用
+
+```python
+from presets import get_preset, preset_to_api_params, list_presets
+
+# 查看所有预设
+print(list_presets())
+
+# 获取预设参数
+preset = get_preset("thinking_coding")
+params, extra_body = preset_to_api_params(preset)
+
+# 传入 API 调用
+client.chat.completions.create(
+    model="qwen",
+    messages=[...],
+    **params,
+    extra_body=extra_body,
+)
+```
+
 ## 硬件
 
 - 2x RTX 4090D (48GB VRAM) | llama-cpp-python + CUDA 12.1

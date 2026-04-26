@@ -4,6 +4,8 @@
 import chainlit as cl
 from openai import OpenAI
 
+from presets import get_preset, preset_to_api_params, list_presets
+
 THINK_TAG = "</think"
 
 client = OpenAI(
@@ -12,11 +14,17 @@ client = OpenAI(
     timeout=300.0,
 )
 
+current_preset = get_preset()
+api_params, extra_body_params = preset_to_api_params(current_preset)
+
 
 @cl.on_chat_start
 async def on_chat_start():
     cl.user_session.set("messages", [])
-    await cl.Message(content="你好！我是本地 LLM 助手，有什么可以帮你的？").send()
+    await cl.Message(
+        content=f"你好！我是本地 LLM 助手，有什么可以帮你的？\n\n"
+        f"📊 当前预设：**{current_preset['description']}**"
+    ).send()
 
 
 @cl.on_message
@@ -31,9 +39,12 @@ async def on_message(message: cl.Message):
         stream = client.chat.completions.create(
             model="qwen",
             messages=messages,
-            max_tokens=4096,
-            temperature=1.0,
+            max_tokens=16384,
             stream=True,
+            **api_params,
+            extra_body={
+                **extra_body_params,
+            },
         )
 
         full_content = []
