@@ -1,12 +1,16 @@
 # AGENTS.md
 
-Guidelines and commands for agentic coding assistants in this repository.
+## Setup
 
----
+```bash
+conda create -n vllm python=3.10 -y
+conda activate vllm
+pip install llama-cpp-python[server] openai chainlit
+```
 
 ## Commands
 
-### Conda Environment
+Always activate conda first:
 ```bash
 source ~/miniconda3/etc/profile.d/conda.sh
 conda activate vllm
@@ -29,6 +33,8 @@ fuser -k 8001/tcp                            # Force-free port
 ```
 
 **Gotcha**: `stop_server.sh` uses `pkill -f "llama_cpp.server"` which kills **any** llama-cpp server. Verify which model is running before stopping.
+
+Logs go to `logs/qwen_27b_gpu_server.log` or `logs/qwopus_27b_gpu_server.log` depending on model.
 
 ### Testing
 
@@ -54,7 +60,7 @@ tail -f logs/web_chat.log
 
 ## Architecture
 
-Two Qwen-variant GGUF models served via `llama-cpp-python` (v0.3.20) with an OpenAI-compatible API, plus a Chainlit web frontend. No build system, no package manager — just shell scripts and standalone Python files.
+Two Qwen-variant GGUF models served via `llama-cpp-python` with an OpenAI-compatible API, plus a Chainlit web frontend (`app.py`). No build system, no package manager — just shell scripts and standalone Python files.
 
 Both models served on `http://localhost:8001/v1`:
 - API key: `"dummy"` (hardcoded everywhere)
