@@ -65,7 +65,7 @@ API endpoint on `http://localhost:8001/v1`:
 ### Critical Gotchas
 
 - **Do NOT use `--chat_format chatml`** in start scripts — it overrides the jinja2 chat template required for `enable_thinking`.
-- **`thinking_*` presets require the model started without `--no-thinking`** or thinking output will be empty.
+- **`chat_template_kwargs` overrides server `--reasoning` flag**. The server flag only sets a default; per-request `enable_thinking` in `chat_template_kwargs` takes precedence. Web chat preset switching works regardless of server think mode.
 - **`repeat_penalty` not `repetition_penalty`**: `llama-server` uses `repeat_penalty`. Always call `adapt_extra_body()` from `presets.py` before passing `extra_body` to the API.
 - Model directory and `llama.cpp/` are gitignored — GGUF files must be placed manually.
 - If GPU OOM: reduce `n_gpu_layers` in start scripts (default: `-1` = all layers).
