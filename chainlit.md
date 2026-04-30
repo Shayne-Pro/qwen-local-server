@@ -17,7 +17,9 @@
 | `thinking_general` | 深度思考 |
 | `thinking_coding` | 代码生成 |
 
-切换预设示例：
+用户可通过输入框上方的 ⚙ 按钮实时切换预设，无需重启服务。
+
+启动时也可通过环境变量指定：
 ```bash
 LLM_PRESET=thinking_coding bash start_web_chat.sh
 ```

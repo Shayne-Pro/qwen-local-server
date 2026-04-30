@@ -1,8 +1,8 @@
 Qwen3.6-27B-UD-Q4_K_XL/
-Qwopus3.5-27B-v3-Q4_K_M/
 __pycache__/
 logs/
 .files/
 .ruff_cache/
 *.pyc
 .chainlit/
+llama.cpp/

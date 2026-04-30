@@ -1,52 +1,66 @@
 #!/usr/bin/env python3
-"""测试 Qwen3.6-27B 模型是否具有思考（thinking）能力"""
+"""测试模型思考（thinking）能力 - 使用 reasoning_content 分离模式
 
-import re
+用法:
+  python test_thinking.py                          # 默认 thinking_coding 预设
+  python test_thinking.py --preset thinking_general
+"""
+
 import sys
 import time
 
 from openai import OpenAI
 
+from presets import get_preset, preset_to_api_params, adapt_extra_body, get_chat_template_kwargs
 
-def parse_thinking_and_answer(full_text):
-    """从响应中分离思考内容和正式回答"""
-    think_end = '</think'
-    idx = full_text.find(think_end)
-    if idx >= 0:
-        thinking = full_text[:idx].strip()
-        if thinking.startswith('<think'):
-            thinking = thinking[len('<think'):].lstrip('>').lstrip('\n')
-        answer = full_text[idx + len(think_end):].strip().lstrip('>').lstrip('\n')
-        return thinking, answer
-    return None, full_text.strip()
+DEFAULT_THINKING_PRESET = "thinking_coding"
 
 
-def stream_test(client, prompt, max_tokens=2048, temperature=0.7):
-    """发送流式请求，收集完整响应并分析思考内容"""
+def stream_test(client, prompt, max_tokens=2048, preset_name=None):
+    p = get_preset(preset_name or DEFAULT_THINKING_PRESET)
+    api_params, extra_body = preset_to_api_params(p)
+    extra_body = adapt_extra_body(extra_body)
+    template_kwargs = get_chat_template_kwargs(p)
+    extra_body["chat_template_kwargs"] = template_kwargs
+
     start_time = time.time()
     stream = client.chat.completions.create(
         model="qwen",
         messages=[{"role": "user", "content": prompt}],
         max_tokens=max_tokens,
-        temperature=temperature,
         stream=True,
+        **api_params,
+        extra_body=extra_body,
     )
 
     full_content = []
+    reasoning_parts = []
     token_count = 0
     first_token_time = None
 
     for chunk in stream:
-        if chunk.choices and chunk.choices[0].delta.content:
+        if not chunk.choices:
+            continue
+        delta = chunk.choices[0].delta
+
+        rc = getattr(delta, "reasoning_content", None)
+        content = delta.content
+
+        if rc:
+            reasoning_parts.append(rc)
             if first_token_time is None:
                 first_token_time = time.time()
-            content = chunk.choices[0].delta.content
+            token_count += 1
+
+        if content:
             full_content.append(content)
+            if first_token_time is None:
+                first_token_time = time.time()
             token_count += 1
 
     end_time = time.time()
-    full_text = "".join(full_content)
-    thinking, answer = parse_thinking_and_answer(full_text)
+    thinking_text = "".join(reasoning_parts).strip()
+    answer_text = "".join(full_content).strip()
 
     total_time = end_time - start_time
     first_token_latency = (first_token_time - start_time) if first_token_time else 0
@@ -54,10 +68,9 @@ def stream_test(client, prompt, max_tokens=2048, temperature=0.7):
     tokens_per_sec = token_count / gen_time if gen_time > 0 else 0
 
     return {
-        "full_text": full_text,
-        "thinking": thinking,
-        "answer": answer,
-        "has_thinking": thinking is not None and len(thinking) > 0,
+        "thinking": thinking_text,
+        "answer": answer_text,
+        "has_thinking": len(thinking_text) > 0,
         "token_count": token_count,
         "total_time": total_time,
         "first_token_latency": first_token_latency,
@@ -66,7 +79,6 @@ def stream_test(client, prompt, max_tokens=2048, temperature=0.7):
 
 
 def print_result(title, result):
-    """打印单个测试场景的结果"""
     print(f"\n{'=' * 60}")
     print(f"  {title}")
     print(f"{'=' * 60}")
@@ -96,7 +108,19 @@ def print_result(title, result):
     print(f"    - 速度: {result['tokens_per_second']:.1f} tokens/s")
 
 
+def parse_args():
+    args = sys.argv[1:]
+    preset_name = None
+    for i, arg in enumerate(args):
+        if arg == "--preset" and i + 1 < len(args):
+            preset_name = args[i + 1]
+    return preset_name
+
+
 def main():
+    preset_name = parse_args()
+    p = get_preset(preset_name or DEFAULT_THINKING_PRESET)
+
     client = OpenAI(
         base_url="http://localhost:8001/v1",
         api_key="dummy",
@@ -108,34 +132,31 @@ def main():
             "title": "场景1: 简单问候（可能不触发思考）",
             "prompt": "你好，请用一句话介绍你自己。",
             "max_tokens": 1024,
-            "temperature": 0.7,
         },
         {
             "title": "场景2: 数学推理（应触发思考）",
             "prompt": "一个水池有两个水管，A管单独注满需要6小时，B管单独注满需要4小时。两管同时打开，几小时能注满？请给出详细解题过程。",
             "max_tokens": 4096,
-            "temperature": 0.3,
         },
         {
             "title": "场景3: 代码逻辑推理（应触发思考）",
             "prompt": "写一个Python函数，判断一个整数是否是回文数。要求：不能将整数转为字符串，只能用数学方法。包含详细注释和测试用例。",
             "max_tokens": 4096,
-            "temperature": 0.3,
         },
     ]
 
     print("=" * 60)
-    print("  Qwen3.6-27B 思考能力测试")
+    print(f"  模型思考能力测试 (reasoning_content 分离模式)")
+    print(f"  预设: {p['description']}")
     print("=" * 60)
 
     results = []
     for s in scenarios:
         print(f"\n⏳ 正在测试: {s['title']}...")
-        r = stream_test(client, s["prompt"], s["max_tokens"], s["temperature"])
+        r = stream_test(client, s["prompt"], s["max_tokens"], preset_name)
         results.append((s["title"], r))
         print_result(s["title"], r)
 
-    # 总结
     think_count = sum(1 for _, r in results if r["has_thinking"])
     total_tokens = sum(r["token_count"] for _, r in results)
     total_time = sum(r["total_time"] for _, r in results)

@@ -2,76 +2,80 @@
 
 ## Before You Start
 
-- **No lint/typecheck tools**: `ruff`, `mypy`, `black`, etc. are not installed. Do not attempt to run them.
-- **No test framework**: Tests (`test_chat.py`, `test_thinking.py`) are standalone scripts using the OpenAI client against a running model — not pytest suites.
-- **No package manager**: No `requirements.txt`, `pyproject.toml`, or `setup.py`. Dependencies installed manually into conda env.
-- `chainlit.md` is auto-generated Chainlit boilerplate — not project documentation.
-
-## Setup
-
-```bash
-conda create -n vllm python=3.10 -y
-conda activate vllm
-pip install llama-cpp-python[server] openai chainlit
-```
+- **No lint/typecheck/test tools**: No `ruff`, `mypy`, `black`, `pytest`, etc. Do not attempt to run them.
+- **No package manager**: No `requirements.txt`, `pyproject.toml`, or `setup.py`. Dependencies installed manually into conda env (`openai`, `chainlit`).
+- **Tests are standalone scripts** using OpenAI client against a running model on port 8001 — not pytest suites.
 
 ## Commands
 
 Always activate conda first:
 ```bash
-source ~/miniconda3/etc/profile.d/conda.sh
-conda activate vllm
+source ~/miniconda3/etc/profile.d/conda.sh && conda activate vllm
 ```
 
-### API Service Management
-
-Both models share port 8001 — only one can run at a time.
+### API Service (port 8001)
 
 ```bash
-bash start_server.sh qwen                    # Background, thinking ON
-bash start_server.sh qwen --no-thinking      # Background, thinking OFF
-bash start_server.sh qwen --fg               # Foreground
-bash start_server.sh qwopus                  # Background
-bash start_server.sh qwopus --fg             # Foreground
-
-bash stop_server.sh                          # Stop (kills any llama_cpp.server)
-curl http://localhost:8001/v1/models         # Check status
-fuser -k 8001/tcp                            # Force-free port
+bash start_server.sh                        # Background, thinking ON
+bash start_server.sh --no-thinking          # Background, thinking OFF
+bash start_server.sh --fg                   # Foreground
+bash stop_server.sh                         # Stop llama-server
+curl http://localhost:8001/v1/models        # Check status
+fuser -k 8001/tcp                           # Force-free port
 ```
 
-**Gotcha**: `stop_server.sh` uses `pkill -f "llama_cpp.server"` which kills **any** llama_cpp server. Verify which model is running before stopping.
+Logs: `logs/qwen_27b_gpu_server.log`.
 
-Logs go to `logs/qwen_27b_gpu_server.log` or `logs/qwopus_27b_gpu_server.log` depending on model.
-
-### Testing
-
-Tests require the model API service running on port 8001. They are standalone scripts (not pytest).
+### Web Chat (port 8080, requires API on 8001)
 
 ```bash
-python test_chat.py              # Quick test (auto-detects model)
-python test_chat.py --full       # Full 3-scenario suite
-python test_thinking.py          # Thinking ability detection (3 scenarios, Qwen3.6 only)
+bash start_web_chat.sh                       # Background, default preset
+LLM_PRESET=thinking_coding bash start_web_chat.sh  # With preset
+bash stop_web_chat.sh
 ```
 
-**Gotcha**: `test_thinking.py` only detects thinking blocks in Qwen3.6 (started without `--no-thinking`). Qwopus thinking is always-on and may not parse the same way.
-
-### Web Chat (Chainlit)
-
-Requires model API running on port 8001.
+### Testing (requires API on 8001)
 
 ```bash
-bash start_web_chat.sh           # Start on port 8080 (background)
-bash stop_web_chat.sh            # Stop
-tail -f logs/web_chat.log
-
-# Switch sampling preset via environment variable
-LLM_PRESET=instruct_reasoning bash start_web_chat.sh
-LLM_PRESET=thinking_coding bash start_web_chat.sh
+python test_chat.py                          # Quick test
+python test_chat.py --full                   # 3-scenario suite
+python test_chat.py --preset thinking_coding
+python test_thinking.py                      # Default: thinking_coding
+python test_thinking.py --preset thinking_general
 ```
 
-### Sampling Presets
+---
 
-Defined in `presets.py`. 4 official Qwen3.6 configurations:
+## Architecture
+
+GGUF model served via `llama-server` (compiled from `llama.cpp/`) with OpenAI-compatible API + Chainlit web frontend (`app.py`). No build system — shell scripts and standalone Python only.
+
+API endpoint on `http://localhost:8001/v1`:
+- API key: `"dummy"` (hardcoded), model name: `"qwen"`, context: 131072 tokens
+
+| | Qwen3.6-27B |
+|---|---|
+| **Weights** | `Qwen3.6-27B-UD-Q4_K_XL/Qwen3.6-27B-UD-Q4_K_XL.gguf` |
+| **Thinking** | Configurable via `enable_thinking` |
+
+### Reasoning Content Separation
+
+`llama-server` uses `--reasoning-format deepseek`. Thinking content → `reasoning_content` field, answer → `content` field. Read via `getattr(delta, "reasoning_content", None)` in streaming chunks.
+
+### Critical Gotchas
+
+- **Do NOT use `--chat_format chatml`** in start scripts — it overrides the jinja2 chat template required for `enable_thinking`.
+- **`thinking_*` presets require the model started without `--no-thinking`** or thinking output will be empty.
+- **`repeat_penalty` not `repetition_penalty`**: `llama-server` uses `repeat_penalty`. Always call `adapt_extra_body()` from `presets.py` before passing `extra_body` to the API.
+- Model directory and `llama.cpp/` are gitignored — GGUF files must be placed manually.
+- If GPU OOM: reduce `n_gpu_layers` in start scripts (default: `-1` = all layers).
+- Compile `llama-server`: `cmake -B build -DGGML_CUDA=ON -DCMAKE_CUDA_COMPILER=/usr/local/cuda-12.4/bin/nvcc -DCMAKE_CUDA_ARCHITECTURES=89`
+
+---
+
+## Presets (`presets.py`)
+
+4 official Qwen3.6 configurations. Switch via `LLM_PRESET` env var or `--preset` CLI arg.
 
 | Preset | temp | top_p | presence_penalty | Mode |
 |--------|------|-------|-----------------|------|
@@ -82,83 +86,44 @@ Defined in `presets.py`. 4 official Qwen3.6 configurations:
 
 All share: `top_k=20, min_p=0.0, repetition_penalty=1.0`
 
-Switch via `LLM_PRESET` env var. Default is `instruct_general`.
+API call pattern:
+```python
+from presets import get_preset, preset_to_api_params, adapt_extra_body, get_chat_template_kwargs
 
-In code: `get_preset()` returns the preset dict, `preset_to_api_params(preset)` splits it into `(standard_params, extra_body)` for the OpenAI client (non-standard params like `top_k`, `min_p`, `repetition_penalty` go through `extra_body`).
+preset = get_preset("thinking_coding")
+params, extra_body = preset_to_api_params(preset)
+extra_body = adapt_extra_body(extra_body)  # repetition_penalty → repeat_penalty
+extra_body["chat_template_kwargs"] = get_chat_template_kwargs(preset)
+```
+
+`get_chat_template_kwargs()` returns `{enable_thinking, preserve_thinking}`:
+- thinking mode → `{"enable_thinking": True, "preserve_thinking": False}`
+- instruct mode → `{"enable_thinking": False}`
 
 ---
 
-## Architecture
+## Chat Session State (`app.py`)
 
-Two Qwen-variant GGUF models served via `llama-cpp-python` with an OpenAI-compatible API, plus a Chainlit web frontend (`app.py`). No build system, no package manager — just shell scripts and standalone Python files.
-
-Both models served on `http://localhost:8001/v1`:
-- API key: `"dummy"` (hardcoded everywhere)
-- Model name: `"qwen"` (used for both models in API calls)
-- Context: 131072 tokens
-- GPU offloading: all layers (`n_gpu_layers=-1`)
-- `app.py` timeout: 300s; `test_chat.py` timeout: 120s; `test_thinking.py` timeout: 300s
-
-| | Qwen (Qwen3.6-27B) | Qwopus (Qwopus3.5-27B-v3) |
-|---|---|---|
-| **Weights** | `Qwen3.6-27B-UD-Q4_K_XL/Qwen3.6-27B-UD-Q4_K_XL.gguf` | `Qwopus3.5-27B-v3-Q4_K_M/Qwopus3.5-27B-v3-Q4_K_M.gguf` |
-| **Thinking** | Configurable via `enable_thinking` | Always on |
-
-### Thinking Mode (Qwen3.6 only)
-
-**Critical**: Do **NOT** use `--chat_format chatml`. It overrides the model's built-in jinja2 chat template, which is required for `enable_thinking` to work.
-
-Controlled via `--chat_template_kwargs`:
-- `enable_thinking`: Controls whether model outputs `<think/>` reasoning blocks
-- `preserve_thinking`: Keeps thinking content in multi-turn history
-
-**Streaming parse**: Response starts with reasoning text, then `</think`, then the actual answer. No `<think` open tag in `delta.content` — injected by chat template. See `app.py` for a working buffered streaming parser.
-
-### Hardware
-- 2x RTX 4090D (48GB total) | llama-cpp-python with CUDA 12.1
-- If GPU OOM: reduce `n_gpu_layers` in start scripts
-
-### Model Weights
-Both model directories are gitignored. GGUF files must be placed manually:
-```
-./Qwen3.6-27B-UD-Q4_K_XL/Qwen3.6-27B-UD-Q4_K_XL.gguf
-./Qwopus3.5-27B-v3-Q4_K_M/Qwopus3.5-27B-v3-Q4_K_M.gguf
-```
+- Messages stored in `cl.user_session["messages"]`, truncated to last **30 messages** before each API call
+- `preserve_thinking: False` means the server strips previous `reasoning_content` from history — do NOT store it in messages on the Python side either
+- Empty/blank messages are silently ignored (no API call)
+- Preset switching via ⚙ button calls `on_settings_update` which updates the session's `current_preset`
 
 ---
 
 ## Code Conventions
 
-### Imports
-No consistent order. Follow the convention of whichever file you're editing.
-
-### Error Handling
-Import `traceback` inline inside except blocks (not at module top):
-```python
-except Exception as e:
-    print(f"\n✗ 测试失败: {e}")
-    import traceback
-    traceback.print_exc()
-    sys.exit(1)
-```
-
-### Streaming API Pattern
-All API calls use streaming (`stream=True`). Key points:
-- Always track first-token latency, token count, and tokens/second
-- Stats format: `:.2f` for seconds, `:.1f` for speed
-
-### Max Tokens
-- Simple chat: 1024 | Code generation: 4096 | Long-form: 2048 | Web chat (`app.py`): 16384
-
-### Output Formatting
-- Section dividers: `"=" * 60` (major), `"-" * 60` (minor)
-- Status indicators: `✓` / `✗` / `📊` / `📈` / `⚠` / `ℹ`
-- UI language is Chinese (zh-CN) for all user-facing strings in test scripts and web chat
-
----
+- **Error handling**: `import traceback` inline inside except blocks, not at module top
+- **Streaming**: All API calls use `stream=True`. Track first-token latency, token count, tokens/sec. Format: `:.2f` for seconds, `:.1f` for speed
+- **Max tokens**: Simple chat 1024 | Code 4096 | Long-form 2048 | Web chat 16384
+- **Output**: Section dividers `"=" * 60` / `"-" * 60`. Status: `✓` `✗` `📊` `📈` `⚠` `ℹ`
+- **UI language**: Chinese (zh-CN) for all user-facing strings in tests and web chat
+- **`chainlit.md`**: Auto-generated Chainlit boilerplate, not project documentation
 
 ## Common Issues
+
 - **Port in use**: `bash stop_server.sh` or `fuser -k 8001/tcp`
 - **Unresponsive**: `curl http://localhost:8001/v1/models`
-- **`enable_thinking` not working**: ensure `--chat_format chatml` is NOT in the start script
-- **`thinking_*` presets produce no thinking output**: model must be started without `--no-thinking` for thinking presets to work
+- **`enable_thinking` not working**: ensure `--chat_format chatml` is NOT in start script
+- **OpenCode shows no reasoning**: ensure `--reasoning-format deepseek` is active
+- **llama-server not found**: compile from `llama.cpp/` with CUDA flags above

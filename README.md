@@ -1,6 +1,8 @@
 # Qwen Local Server
 
-基于 [llama-cpp-python](https://github.com/abetlen/llama-cpp-python) + CUDA 的本地大语言模型推理服务。支持 **Qwen3.6-27B** 和 **Qwopus3.5-27B** 双模型切换，提供 OpenAI 兼容 API 与 Chainlit Web 聊天界面。
+基于 [llama.cpp](https://github.com/ggerganov/llama.cpp) + CUDA 的本地大语言模型推理服务。使用 **Qwen3.6-27B** 模型，提供 OpenAI 兼容 API 与 Chainlit Web 聊天界面。
+
+使用 `llama-server` 后端，通过 `--reasoning-format deepseek` 将思考内容分离到 `reasoning_content` 字段。
 
 ## 快速开始
 
@@ -9,7 +11,7 @@
 ```bash
 conda create -n vllm python=3.10 -y
 conda activate vllm
-pip install llama-cpp-python[server] openai chainlit
+pip install openai chainlit
 ```
 
 ### 2. 准备模型文件
@@ -18,27 +20,31 @@ pip install llama-cpp-python[server] openai chainlit
 
 ```
 ./Qwen3.6-27B-UD-Q4_K_XL/Qwen3.6-27B-UD-Q4_K_XL.gguf
-./Qwopus3.5-27B-v3-Q4_K_M/Qwopus3.5-27B-v3-Q4_K_M.gguf
 ```
 
-### 3. 启动模型服务
-
-> 两个模型共享端口 **8001**，同一时间只能运行一个。
+### 3. 编译 llama-server
 
 ```bash
-bash start_server.sh qwen                    # 后台，思考模式
-bash start_server.sh qwen --no-thinking      # 后台，非思考模式
-bash start_server.sh qwopus                  # 后台
+cd llama.cpp
+cmake -B build -DGGML_CUDA=ON -DCMAKE_CUDA_COMPILER=/usr/local/cuda-12.4/bin/nvcc -DCMAKE_CUDA_ARCHITECTURES=89
+cmake --build build --config Release -j$(nproc)
+```
+
+### 4. 启动模型服务
+
+```bash
+bash start_server.sh                        # 后台，思考模式
+bash start_server.sh --no-thinking          # 后台，非思考模式
 
 # 前台运行（查看实时输出）
-bash start_server.sh qwen --fg
+bash start_server.sh --fg
 
 # 查看日志 / 验证状态
 tail -f logs/qwen_27b_gpu_server.log
 curl http://localhost:8001/v1/models
 ```
 
-### 4. 启动 Web 聊天
+### 5. 启动 Web 聊天
 
 ```bash
 bash start_web_chat.sh
@@ -46,17 +52,19 @@ bash stop_web_chat.sh
 tail -f logs/web_chat.log
 ```
 
-浏览器访问 `http://localhost:8080`。
+浏览器访问 `http://localhost:8080`。界面内点击 ⚙ 按钮可实时切换采样预设。
 
-### 5. 运行测试
+### 6. 运行测试
 
 ```bash
-python test_chat.py              # 快速测试
-python test_chat.py --full       # 完整 3 场景测试
-python test_thinking.py          # 思考能力检测
+python test_chat.py                          # 快速测试
+python test_chat.py --full                   # 完整 3 场景测试
+python test_chat.py --preset thinking_coding # 指定预设
+python test_thinking.py                      # 思考能力检测（默认 thinking_coding）
+python test_thinking.py --preset thinking_general
 ```
 
-### 6. 停止服务
+### 7. 停止服务
 
 ```bash
 bash stop_server.sh              # 停止模型服务
@@ -70,7 +78,7 @@ Qwen3.6-27B 支持可配置的思考（reasoning）模式：
 - **开启思考**（默认）：模型先输出推理过程，再给出正式回答
 - **关闭思考**：模型直接输出回答，速度更快、token 更少
 
-启动脚本通过 `--chat_template_kwargs` 控制此行为，支持运行时切换。
+通过 `--reasoning on/off` 和 `chat_template_kwargs` 控制。思考内容通过 `reasoning_content` 字段返回，与正式回答分离。
 
 ## 采样参数预设
 
@@ -97,7 +105,7 @@ bash start_web_chat.sh
 LLM_PRESET=thinking_coding bash start_web_chat.sh
 
 # 切换到推理 Instruct 模式
-LLM_PRESET=instrat_reasoning bash start_web_chat.sh
+LLM_PRESET=instruct_reasoning bash start_web_chat.sh
 
 # 切换到通用思考模式
 LLM_PRESET=thinking_general bash start_web_chat.sh
@@ -108,14 +116,13 @@ LLM_PRESET=thinking_general bash start_web_chat.sh
 ### Python 代码中使用
 
 ```python
-from presets import get_preset, preset_to_api_params, list_presets
-
-# 查看所有预设
-print(list_presets())
+from presets import get_preset, preset_to_api_params, adapt_extra_body, get_chat_template_kwargs
 
 # 获取预设参数
 preset = get_preset("thinking_coding")
 params, extra_body = preset_to_api_params(preset)
+extra_body = adapt_extra_body(extra_body)  # repetition_penalty → repeat_penalty
+extra_body["chat_template_kwargs"] = get_chat_template_kwargs(preset)
 
 # 传入 API 调用
 client.chat.completions.create(
@@ -128,5 +135,5 @@ client.chat.completions.create(
 
 ## 硬件
 
-- 2x RTX 4090D (48GB VRAM) | llama-cpp-python + CUDA 12.1
+- 2x RTX 4090D (48GB VRAM) | llama-server + CUDA 12.4
 - GPU OOM 时：降低 `n_gpu_layers`

@@ -6,7 +6,7 @@
 mkdir -p logs
 
 # 后台启动服务，输出到日志文件
-nohup bash -c 'source ~/miniconda3/etc/profile.d/conda.sh && conda activate vllm && chainlit run app.py --host 0.0.0.0 --port 8080' > logs/web_chat.log 2>&1 &
+nohup env LLM_PRESET="${LLM_PRESET:-instruct_general}" bash -c 'source ~/miniconda3/etc/profile.d/conda.sh && conda activate vllm && chainlit run app.py --host 0.0.0.0 --port 8080' > logs/web_chat.log 2>&1 &
 
 # 获取进程ID
 PID=$!
@@ -16,6 +16,7 @@ echo "================================================"
 echo "进程ID: $PID"
 echo "访问地址: http://localhost:8080"
 echo "后端 API: http://localhost:8001/v1"
+echo "采样预设: ${LLM_PRESET:-instruct_general (默认)}"
 echo ""
 echo "日志文件: logs/web_chat.log"
 echo "查看日志: tail -f logs/web_chat.log"

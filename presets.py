@@ -5,7 +5,7 @@ Official recommended configurations from Qwen3.6 documentation.
 Each preset includes: temperature, top_p, top_k, min_p, presence_penalty, repetition_penalty.
 
 Usage:
-    from presets import get_preset, list_presets
+    from presets import get_preset, preset_to_api_params
     params = get_preset()          # default: instruct_general
     params = get_preset("thinking_coding")
 
@@ -72,11 +72,6 @@ def get_preset(name=None):
     return PRESETS[name]
 
 
-def list_presets():
-    """Return all preset names with descriptions."""
-    return {k: v["description"] for k, v in PRESETS.items()}
-
-
 def preset_to_api_params(preset):
     """Convert a preset dict to OpenAI API call parameters.
 
@@ -95,3 +90,23 @@ def preset_to_api_params(preset):
         "repetition_penalty": preset["repetition_penalty"],
     }
     return params, extra_body
+
+
+def get_chat_template_kwargs(preset):
+    """Get chat_template_kwargs for the given preset.
+
+    For thinking mode presets, enables reasoning and disables preservation
+    (previous thinking content should not be re-sent to the model).
+    For instruct mode presets, explicitly disables thinking on the server.
+    """
+    if preset.get("mode") == "thinking":
+        return {"enable_thinking": True, "preserve_thinking": False}
+    return {"enable_thinking": False}
+
+
+def adapt_extra_body(params):
+    """Adapt extra_body for llama-server: repetition_penalty → repeat_penalty."""
+    adapted = dict(params)
+    if "repetition_penalty" in adapted:
+        adapted["repeat_penalty"] = adapted.pop("repetition_penalty")
+    return adapted
