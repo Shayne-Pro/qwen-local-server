@@ -6,3 +6,4 @@ logs/
 *.pyc
 .chainlit/
 llama.cpp/
+.DS_Store
