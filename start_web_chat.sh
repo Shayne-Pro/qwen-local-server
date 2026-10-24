@@ -2,11 +2,18 @@
 
 # Chainlit 网页问答界面后台启动脚本
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR"
+if ! command -v chainlit >/dev/null 2>&1; then
+    echo "✗ 当前环境没有 chainlit，请先激活已安装依赖的 conda 环境"
+    exit 1
+fi
+
 # 确保日志目录存在
 mkdir -p logs
 
 # 后台启动服务，输出到日志文件
-nohup env LLM_PRESET="${LLM_PRESET:-instruct_general}" bash -c 'source ~/miniconda3/etc/profile.d/conda.sh && conda activate vllm && chainlit run app.py --host 0.0.0.0 --port 8080' > logs/web_chat.log 2>&1 &
+nohup env LLM_PRESET="${LLM_PRESET:-instruct_general}" chainlit run app.py --host 0.0.0.0 --port 8080 > logs/web_chat.log 2>&1 &
 
 # 获取进程ID
 PID=$!
