@@ -1,139 +1,84 @@
 # Qwen Local Server
 
-基于 [llama.cpp](https://github.com/ggerganov/llama.cpp) + CUDA 的本地大语言模型推理服务。使用 **Qwen3.6-27B** 模型，提供 OpenAI 兼容 API 与 Chainlit Web 聊天界面。
+基于 [llama.cpp](https://github.com/ggml-org/llama.cpp) 的本地 GGUF 模型推理服务，提供 OpenAI 兼容 API 和 Chainlit 流式聊天界面。当前启动脚本配置为 `Qwen3.6-27B`；模型权重和后端源码均不随本仓库分发。
 
-使用 `llama-server` 后端，通过 `--reasoning-format deepseek` 将思考内容分离到 `reasoning_content` 字段。
+## 功能与结构
 
-## 快速开始
+| 文件 | 用途 |
+| --- | --- |
+| `start_server.sh` / `stop_server.sh` | 启停 llama-server；默认 API 端口 8001 |
+| `app.py` | Chainlit 聊天、会话历史、参数切换、思考内容分离 |
+| `presets.py` | 四组采样预设及 llama-server 参数适配 |
+| `start_web_chat.sh` / `stop_web_chat.sh` | 启停网页聊天；默认端口 8080 |
+| `test_chat.py`, `test_thinking.py` | 对真实模型 API 的独立验证脚本 |
 
-### 1. 环境准备
+## 环境准备
+
+以下后端编译参数对应现有双 RTX 4090D / CUDA 配置。其他显卡需要匹配本机 CUDA 和计算能力。
 
 ```bash
+git clone https://github.com/Shayne-Pro/qwen-local-server.git
+cd qwen-local-server
 conda create -n vllm python=3.10 -y
 conda activate vllm
-pip install openai chainlit
+python -m pip install openai chainlit
+
+git clone --depth 1 https://github.com/ggml-org/llama.cpp.git llama.cpp
+cmake -S llama.cpp -B llama.cpp/build -DGGML_CUDA=ON -DCMAKE_CUDA_COMPILER=/usr/local/cuda-12.4/bin/nvcc -DCMAKE_CUDA_ARCHITECTURES=89
+cmake --build llama.cpp/build --config Release -j
 ```
 
-### 2. 准备模型文件
+自行准备有权使用的 GGUF 文件，放到脚本指定的位置：
 
-将 GGUF 模型权重放置到以下目录（已 gitignore）：
-
+```text
+Qwen3.6-27B-UD-Q4_K_XL/
+  Qwen3.6-27B-UD-Q4_K_XL.gguf
 ```
-./Qwen3.6-27B-UD-Q4_K_XL/Qwen3.6-27B-UD-Q4_K_XL.gguf
-```
 
-### 3. 编译 llama-server
+如果模型路径、CUDA 安装或硬件不同，先调整 `start_server.sh`。编译后检查 `llama.cpp/build/bin/llama-server --help` 是否支持脚本中的 `--reasoning`、`--reasoning-format` 和 `--jinja` 参数。后端版本未锁定；模型能力与兼容性以实际准备的权重和后端为准。
+
+## 启动与检查
+
+保持已激活的 `vllm` 环境，运行：
 
 ```bash
-cd llama.cpp
-cmake -B build -DGGML_CUDA=ON -DCMAKE_CUDA_COMPILER=/usr/local/cuda-12.4/bin/nvcc -DCMAKE_CUDA_ARCHITECTURES=89
-cmake --build build --config Release -j$(nproc)
-```
-
-### 4. 启动模型服务
-
-```bash
-bash start_server.sh                        # 后台，思考模式
-bash start_server.sh --no-thinking          # 后台，非思考模式
-
-# 前台运行（查看实时输出）
-bash start_server.sh --fg
-
-# 查看日志 / 验证状态
-tail -f logs/qwen_27b_gpu_server.log
+bash start_server.sh
 curl http://localhost:8001/v1/models
-```
-
-### 5. 启动 Web 聊天
-
-```bash
 bash start_web_chat.sh
-bash stop_web_chat.sh
-tail -f logs/web_chat.log
 ```
 
-浏览器访问 `http://localhost:8080`。界面内点击 ⚙ 按钮可实时切换采样预设。
+打开 <http://localhost:8080>。API 地址为 <http://localhost:8001/v1>。日志分别位于 `logs/qwen_27b_gpu_server.log` 和 `logs/web_chat.log`。网页启动脚本使用当前环境中的 `chainlit`，不依赖固定的 conda 安装目录。
 
-### 6. 运行测试
+后端可用 `bash start_server.sh --fg` 前台运行，或加 `--no-thinking` 设置服务端的非思考默认值。现有脚本监听 `0.0.0.0`，且没有配置鉴权；部署访问范围由宿主机网络和网关配置决定。
+
+## 预设与思考内容
+
+| 预设 | 模式 | temperature | top_p | presence_penalty |
+| --- | --- | --- | --- | --- |
+| `thinking_general` | 思考 / 通用 | 1.0 | 0.95 | 1.5 |
+| `thinking_coding` | 思考 / 编程 | 0.6 | 0.95 | 0.0 |
+| `instruct_general` | 非思考 / 通用，默认 | 0.7 | 0.8 | 1.5 |
+| `instruct_reasoning` | 非思考 / 推理 | 1.0 | 0.95 | 1.5 |
 
 ```bash
-python test_chat.py                          # 快速测试
-python test_chat.py --full                   # 完整 3 场景测试
-python test_chat.py --preset thinking_coding # 指定预设
-python test_thinking.py                      # 思考能力检测（默认 thinking_coding）
+LLM_PRESET=thinking_coding bash start_web_chat.sh
+```
+
+`LLM_PRESET` 设置启动时的预设，也可以在网页 ⚙ 菜单中切换。请求中的 `chat_template_kwargs.enable_thinking` 优先于服务端的默认 `--reasoning` 设置，因此切换预设时不需要重启模型。
+
+`reasoning_content` 显示在独立的折叠区域，最终回答通过 `content` 流式输出；思考文本不加入后续对话历史。调用 API 时使用 `adapt_extra_body()`，将预设中的 `repetition_penalty` 转为后端接受的 `repeat_penalty`。完整参数见 `presets.py`。
+
+## 模型验证
+
+以下脚本需要已经运行的真实模型服务；不是离线单元测试：
+
+```bash
+python test_chat.py
+python test_chat.py --full
+python test_chat.py --preset thinking_coding
 python test_thinking.py --preset thinking_general
 ```
 
-### 7. 停止服务
+这轮维护校验了预设初始化与参数传递，不代表重新完成双卡模型推理、吞吐或显存测试。聊天界面不会自动训练或微调模型。
 
-```bash
-bash stop_server.sh              # 停止模型服务
-bash stop_web_chat.sh            # 停止 Web 聊天
-```
-
-## 思考模式
-
-Qwen3.6-27B 支持可配置的思考（reasoning）模式：
-
-- **开启思考**（默认）：模型先输出推理过程，再给出正式回答
-- **关闭思考**：模型直接输出回答，速度更快、token 更少
-
-通过 `--reasoning on/off` 和 `chat_template_kwargs` 控制。思考内容通过 `reasoning_content` 字段返回，与正式回答分离。
-
-## 采样参数预设
-
-Qwen3.6 官方推荐了 4 种采样参数配置，适用于不同场景。通过 `LLM_PRESET` 环境变量切换：
-
-### 预设列表
-
-| 预设名称 | 用途 | temperature | top_p | presence_penalty |
-|---------|------|------------|-------|-----------------|
-| `thinking_general` | 通用任务（思考模式） | 1.0 | 0.95 | 1.5 |
-| `thinking_coding` | 精确编码（思考模式） | 0.6 | 0.95 | 0.0 |
-| `instruct_general` | 通用任务（非思考） | 0.7 | 0.8 | 1.5 |
-| `instruct_reasoning` | 推理任务（非思考） | 1.0 | 0.95 | 1.5 |
-
-所有预设共有：`top_k=20`, `min_p=0.0`, `repetition_penalty=1.0`
-
-### 使用方式
-
-```bash
-# 默认使用 instruct_general
-bash start_web_chat.sh
-
-# 切换到精确编码思考模式（需先启动 thinking 模式的模型服务）
-LLM_PRESET=thinking_coding bash start_web_chat.sh
-
-# 切换到推理 Instruct 模式
-LLM_PRESET=instruct_reasoning bash start_web_chat.sh
-
-# 切换到通用思考模式
-LLM_PRESET=thinking_general bash start_web_chat.sh
-```
-
-> **注意**：使用 `thinking_*` 预设时，需配合思考模式启动模型服务（不加 `--no-thinking`）。
-
-### Python 代码中使用
-
-```python
-from presets import get_preset, preset_to_api_params, adapt_extra_body, get_chat_template_kwargs
-
-# 获取预设参数
-preset = get_preset("thinking_coding")
-params, extra_body = preset_to_api_params(preset)
-extra_body = adapt_extra_body(extra_body)  # repetition_penalty → repeat_penalty
-extra_body["chat_template_kwargs"] = get_chat_template_kwargs(preset)
-
-# 传入 API 调用
-client.chat.completions.create(
-    model="qwen",
-    messages=[...],
-    **params,
-    extra_body=extra_body,
-)
-```
-
-## 硬件
-
-- 2x RTX 4090D (48GB VRAM) | llama-server + CUDA 12.4
-- GPU OOM 时：降低 `n_gpu_layers`
+停止命令为 `bash stop_web_chat.sh` 和 `bash stop_server.sh`。现有停止脚本按进程模式及端口匹配服务；共享环境中应先核对目标进程。

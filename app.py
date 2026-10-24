@@ -2,9 +2,10 @@
 """Chainlit web chat interface for local LLM API service."""
 
 import chainlit as cl
+import os
 from openai import OpenAI
 
-from presets import get_preset, preset_to_api_params, adapt_extra_body, get_chat_template_kwargs, PRESETS
+from presets import get_preset, preset_to_api_params, adapt_extra_body, get_chat_template_kwargs, PRESETS, DEFAULT_PRESET
 
 PRESET_LABELS = {
     "thinking_general": "💭 思考-通用",
@@ -14,6 +15,8 @@ PRESET_LABELS = {
 }
 
 LABEL_TO_PRESET = {v: k for k, v in PRESET_LABELS.items()}
+INITIAL_PRESET = os.environ.get("LLM_PRESET", DEFAULT_PRESET)
+get_preset(INITIAL_PRESET)
 
 client = OpenAI(
     base_url="http://localhost:8001/v1",
@@ -49,7 +52,7 @@ chat_settings = cl.ChatSettings(
             id="preset",
             label="采样预设",
             items=PRESET_LABELS,
-            initial_value="instruct_general",
+            initial_value=INITIAL_PRESET,
             tooltip="切换模型的采样参数和思考模式",
         ),
     ]
@@ -58,12 +61,12 @@ chat_settings = cl.ChatSettings(
 
 @cl.on_chat_start
 async def on_chat_start():
-    cl.user_session.set("current_preset", "instruct_general")
+    cl.user_session.set("current_preset", INITIAL_PRESET)
     cl.user_session.set("messages", [])
 
     await chat_settings.send()
 
-    preset = get_preset("instruct_general")
+    preset = get_preset(INITIAL_PRESET)
     await cl.Message(
         content=f"你好！我是本地 LLM 助手，有什么可以帮你的？\n\n"
         f"📊 当前预设：**{preset['description']}**\n\n"
